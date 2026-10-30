@@ -23,11 +23,9 @@ const PRESETS: Record<TreeSpecies, string> = {
   bush: 'Bush 1',
 };
 const LOD0_RANGE = 52;
-const LOD1_RANGE = 150;
 
 interface Variant {
   hi: StreamedInstances;
-  lo: StreamedInstances;
 }
 
 export async function setupTrees(scene: THREE.Scene, isSoftwareGl: boolean): Promise<TreeSystem> {
@@ -83,7 +81,7 @@ export async function setupTrees(scene: THREE.Scene, isSoftwareGl: boolean): Pro
   for (const species of Object.keys(TREE_VARIANTS) as TreeSpecies[]) {
     for (let v = 0; v < TREE_VARIANTS[species]; v++) {
       if (!counts.get(`${species}:${v}`)) continue;
-      variants.set(`${species}:${v}`, { hi: build(species, v, 0), lo: build(species, v, 1) });
+      variants.set(`${species}:${v}`, { hi: build(species, v, 0) });
     }
   }
 
@@ -92,11 +90,10 @@ export async function setupTrees(scene: THREE.Scene, isSoftwareGl: boolean): Pro
   let lz = Infinity;
 
   function rebuild(px: number, pz: number) {
-    const reach = LOD1_RANGE + CHUNK_SIZE;
+    const reach = LOD0_RANGE + CHUNK_SIZE;
     const lists = new Map<StreamedInstances, number>();
     variants.forEach((v) => {
       lists.set(v.hi, 0);
-      lists.set(v.lo, 0);
     });
     for (let cx = chunkCoord(px - reach); cx <= chunkCoord(px + reach); cx++) {
       for (let cz = chunkCoord(pz - reach); cz <= chunkCoord(pz + reach); cz++) {
@@ -104,10 +101,10 @@ export async function setupTrees(scene: THREE.Scene, isSoftwareGl: boolean): Pro
         if (!arr) continue;
         for (const t of arr) {
           const d = Math.hypot(t.x - px, t.z - pz);
-          if (d > LOD1_RANGE) continue;
+          if (d > LOD0_RANGE) continue; // only detailed trees near the player
           const v = variants.get(`${t.species}:${t.variant}`);
           if (!v) continue;
-          const pool = d < LOD0_RANGE ? v.hi : v.lo;
+          const pool = v.hi;
           const n = lists.get(pool)!;
           if (n >= pool.capacity) continue;
           dummy.position.set(t.x, t.y - 0.05, t.z);
@@ -133,7 +130,6 @@ export async function setupTrees(scene: THREE.Scene, isSoftwareGl: boolean): Pro
     dispose: () => {
       variants.forEach((v) => {
         v.hi.dispose();
-        v.lo.dispose();
       });
       scene.remove(group);
       new Set(disposables).forEach((d) => d.dispose());
