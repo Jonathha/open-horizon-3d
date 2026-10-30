@@ -1,8 +1,5 @@
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
-import { getTerrainHeight } from './terrain';
-import { createBarkTexture, createRockTexture } from './proceduralTextures';
 import { setupVegetationSystem } from './vegetation';
 
 export interface EnvironmentController {
@@ -112,19 +109,19 @@ export function setupEnvironment(
 
   // 4. Balanced Daylight Rig
   // Hemisphere light: clear azure sky fill + warm meadow earth bounce
-  const hemiLight = new THREE.HemisphereLight(0x9eccf8, 0x485834, 1.05);
+  const hemiLight = new THREE.HemisphereLight(0xa9cdf0, 0x5a6a3e, 0.9);
   scene.add(hemiLight);
 
   // Key directional light (Golden sunlight)
-  const sunLight = new THREE.DirectionalLight(0xfffaec, 2.4);
+  const sunLight = new THREE.DirectionalLight(0xfff1d6, 2.6);
   sunLight.position.set(65, 115, 55);
   sunLight.castShadow = !isSoftwareGl;
   if (!isSoftwareGl) {
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.mapSize.width = 4096;
+    sunLight.shadow.mapSize.height = 4096;
     sunLight.shadow.camera.near = 10;
     sunLight.shadow.camera.far = 280;
-    const shadowDist = 55;
+    const shadowDist = 48;
     sunLight.shadow.camera.left = -shadowDist;
     sunLight.shadow.camera.right = shadowDist;
     sunLight.shadow.camera.top = shadowDist;
@@ -140,228 +137,7 @@ export function setupEnvironment(
   fillLight.position.set(-60, 45, -60);
   scene.add(fillLight);
 
-  // 5. Instanced High-Fidelity 3D Conifer Pines (Multi-Tier Layered Needles & Flared Bark Trunk)
-  const pineCount = 240;
-  const pineTrunkMain = new THREE.CylinderGeometry(0.24, 0.48, 3.8, 8);
-  pineTrunkMain.translate(0, 1.9, 0);
-  const pineRootFlare = new THREE.CylinderGeometry(0.48, 0.72, 0.6, 8);
-  pineRootFlare.translate(0, 0.3, 0);
-  const pineTrunkGeo = mergeGeometries([pineTrunkMain, pineRootFlare])!;
-  pineTrunkGeo.computeVertexNormals();
-  pineTrunkMain.dispose();
-  pineRootFlare.dispose();
-
-  const pineTrunkTex = createBarkTexture();
-  const pineTrunkMat = new THREE.MeshStandardMaterial({
-    map: pineTrunkTex,
-    roughness: 0.9,
-    metalness: 0.02,
-  });
-  const pineTrunkMesh = new THREE.InstancedMesh(pineTrunkGeo, pineTrunkMat, pineCount);
-  pineTrunkMesh.castShadow = !isSoftwareGl;
-  pineTrunkMesh.receiveShadow = true;
-
-  // 4 Overlapping tiered needle skirts with realistic conical overhang
-  const pTier1 = new THREE.ConeGeometry(2.8, 2.2, 8); pTier1.translate(0, 2.8, 0);
-  const pTier2 = new THREE.ConeGeometry(2.3, 1.9, 8); pTier2.translate(0, 4.1, 0);
-  const pTier3 = new THREE.ConeGeometry(1.8, 1.7, 8); pTier3.translate(0, 5.3, 0);
-  const pTier4 = new THREE.ConeGeometry(1.2, 1.5, 8); pTier4.translate(0, 6.4, 0);
-  const pineFoliageGeo = mergeGeometries([pTier1, pTier2, pTier3, pTier4])!;
-  pineFoliageGeo.computeVertexNormals();
-  pTier1.dispose();
-  pTier2.dispose();
-  pTier3.dispose();
-  pTier4.dispose();
-
-  const pineFoliageMat = new THREE.MeshStandardMaterial({
-    color: 0x224c26,
-    roughness: 0.85,
-    metalness: 0.04,
-    flatShading: true,
-  });
-  const pineFoliageMesh = new THREE.InstancedMesh(pineFoliageGeo, pineFoliageMat, pineCount);
-  pineFoliageMesh.castShadow = !isSoftwareGl;
-  pineFoliageMesh.receiveShadow = true;
-
-  // 6. Instanced High-Fidelity 3D Broadleaf Trees (Sculpted Branching Trunk & Multi-Cluster Organic Canopy)
-  const oakCount = 120;
-  const oakTrunkBase = new THREE.CylinderGeometry(0.36, 0.62, 3.2, 8); oakTrunkBase.translate(0, 1.6, 0);
-  const oakRootFlare = new THREE.CylinderGeometry(0.62, 0.88, 0.5, 8); oakRootFlare.translate(0, 0.25, 0);
-  const oakBough1 = new THREE.CylinderGeometry(0.22, 0.32, 2.2, 7);
-  oakBough1.rotateZ(-0.38); oakBough1.rotateX(0.12); oakBough1.translate(0.65, 3.2, 0.15);
-  const oakBough2 = new THREE.CylinderGeometry(0.20, 0.30, 2.0, 7);
-  oakBough2.rotateZ(0.40); oakBough2.rotateX(-0.18); oakBough2.translate(-0.62, 3.3, -0.2);
-  const oakBough3 = new THREE.CylinderGeometry(0.18, 0.26, 1.8, 7);
-  oakBough3.rotateX(0.38); oakBough3.translate(0.1, 3.4, 0.6);
-  const oakTrunkGeo = mergeGeometries([oakTrunkBase, oakRootFlare, oakBough1, oakBough2, oakBough3])!;
-  oakTrunkGeo.computeVertexNormals();
-  oakTrunkBase.dispose();
-  oakRootFlare.dispose();
-  oakBough1.dispose();
-  oakBough2.dispose();
-  oakBough3.dispose();
-
-  const oakTrunkMat = new THREE.MeshStandardMaterial({
-    map: pineTrunkTex,
-    roughness: 0.88,
-    metalness: 0.04,
-  });
-  const oakTrunkMesh = new THREE.InstancedMesh(oakTrunkGeo, oakTrunkMat, oakCount);
-  oakTrunkMesh.castShadow = !isSoftwareGl;
-  oakTrunkMesh.receiveShadow = true;
-
-  // Multi-cluster volumetric canopy with 5 interpenetrating foliage clusters
-  const cCenter = new THREE.DodecahedronGeometry(2.3, 1); cCenter.translate(0, 5.2, 0);
-  const c1 = new THREE.DodecahedronGeometry(1.8, 1); c1.translate(1.4, 4.6, 0.4);
-  const c2 = new THREE.DodecahedronGeometry(1.7, 1); c2.translate(-1.3, 4.7, -0.4);
-  const c3 = new THREE.DodecahedronGeometry(1.6, 1); c3.translate(0.2, 4.8, 1.3);
-  const cTop = new THREE.DodecahedronGeometry(1.5, 1); cTop.translate(-0.1, 6.2, 0.1);
-  const oakCanopyGeo = mergeGeometries([cCenter, c1, c2, c3, cTop])!;
-  oakCanopyGeo.computeVertexNormals();
-  cCenter.dispose();
-  c1.dispose();
-  c2.dispose();
-  c3.dispose();
-  cTop.dispose();
-
-  const oakCanopyMat = new THREE.MeshStandardMaterial({
-    color: 0x3d7428,
-    roughness: 0.82,
-    metalness: 0.03,
-    flatShading: true,
-  });
-  const oakCanopyMesh = new THREE.InstancedMesh(oakCanopyGeo, oakCanopyMat, oakCount);
-  oakCanopyMesh.castShadow = !isSoftwareGl;
-  oakCanopyMesh.receiveShadow = true;
-
-  const dummy = new THREE.Object3D();
-  const pineColors = [
-    new THREE.Color(0x245228),
-    new THREE.Color(0x1a421f),
-    new THREE.Color(0x2c6230),
-    new THREE.Color(0x1d3d20),
-    new THREE.Color(0x356e39),
-  ];
-
-  const oakColors = [
-    new THREE.Color(0x4a822f),
-    new THREE.Color(0x3b6f24),
-    new THREE.Color(0x569637),
-    new THREE.Color(0x386121),
-  ];
-
-  // Distribute Pines
-  let pineIdx = 0;
-  for (let i = 0; i < pineCount * 2 && pineIdx < pineCount; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 14 + Math.pow(Math.random(), 0.7) * 140;
-    const tx = Math.cos(angle) * dist;
-    const tz = Math.sin(angle) * dist;
-    const ty = getTerrainHeight(tx, tz);
-
-    const sY = 0.85 + Math.random() * 0.45;
-    const sXZ = 0.85 + Math.random() * 0.35;
-
-    dummy.position.set(tx, ty, tz);
-    dummy.rotation.y = Math.random() * Math.PI * 2;
-    dummy.scale.set(sXZ, sY, sXZ);
-    dummy.updateMatrix();
-
-    pineTrunkMesh.setMatrixAt(pineIdx, dummy.matrix);
-    pineFoliageMesh.setMatrixAt(pineIdx, dummy.matrix);
-    pineFoliageMesh.setColorAt(pineIdx, pineColors[Math.floor(Math.random() * pineColors.length)]);
-    pineIdx++;
-  }
-  pineTrunkMesh.instanceMatrix.needsUpdate = true;
-  pineFoliageMesh.instanceMatrix.needsUpdate = true;
-  if (pineFoliageMesh.instanceColor) pineFoliageMesh.instanceColor.needsUpdate = true;
-  pineTrunkMesh.computeBoundingSphere();
-  pineFoliageMesh.computeBoundingSphere();
-  scene.add(pineTrunkMesh);
-  scene.add(pineFoliageMesh);
-
-  // Distribute Oaks
-  let oakIdx = 0;
-  for (let i = 0; i < oakCount * 2 && oakIdx < oakCount; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 18 + Math.pow(Math.random(), 0.65) * 135;
-    const tx = Math.cos(angle) * dist;
-    const tz = Math.sin(angle) * dist;
-    const ty = getTerrainHeight(tx, tz);
-
-    const s = 0.85 + Math.random() * 0.4;
-    dummy.position.set(tx, ty, tz);
-    dummy.rotation.y = Math.random() * Math.PI * 2;
-    dummy.scale.set(s, s * (0.9 + Math.random() * 0.25), s);
-    dummy.updateMatrix();
-
-    oakTrunkMesh.setMatrixAt(oakIdx, dummy.matrix);
-    oakCanopyMesh.setMatrixAt(oakIdx, dummy.matrix);
-    oakCanopyMesh.setColorAt(oakIdx, oakColors[Math.floor(Math.random() * oakColors.length)]);
-    oakIdx++;
-  }
-  oakTrunkMesh.instanceMatrix.needsUpdate = true;
-  oakCanopyMesh.instanceMatrix.needsUpdate = true;
-  if (oakCanopyMesh.instanceColor) oakCanopyMesh.instanceColor.needsUpdate = true;
-  oakTrunkMesh.computeBoundingSphere();
-  oakCanopyMesh.computeBoundingSphere();
-  scene.add(oakTrunkMesh);
-  scene.add(oakCanopyMesh);
-
-  // 7. Instanced Boulders & Rock Outcrops
-  const rockCount = 200;
-  const rockGeo = new THREE.DodecahedronGeometry(1.5, 1);
-  const rockPosAttr = rockGeo.attributes.position;
-  for (let i = 0; i < rockPosAttr.count; i++) {
-    const vy = rockPosAttr.getY(i);
-    if (vy < 0) rockPosAttr.setY(i, vy * 0.6);
-  }
-  rockGeo.computeVertexNormals();
-
-  const { diffuse: rockDiff, normal: rockNorm } = createRockTexture();
-  const rockMat = new THREE.MeshStandardMaterial({
-    map: rockDiff,
-    normalMap: rockNorm,
-    roughness: 0.85,
-    metalness: 0.08,
-    flatShading: true,
-  });
-
-  const rockMesh = new THREE.InstancedMesh(rockGeo, rockMat, rockCount);
-  rockMesh.castShadow = !isSoftwareGl;
-  rockMesh.receiveShadow = true;
-
-  const rockColors = [
-    new THREE.Color(0x82888e),
-    new THREE.Color(0x6a7076),
-    new THREE.Color(0x9aa1a8),
-    new THREE.Color(0x54595e),
-  ];
-
-  let rockIdx = 0;
-  for (let i = 0; i < rockCount * 2 && rockIdx < rockCount; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const dist = 8 + Math.pow(Math.random(), 0.6) * 145;
-    const rx = Math.cos(angle) * dist;
-    const rz = Math.sin(angle) * dist;
-    const ry = getTerrainHeight(rx, rz);
-
-    const s = 0.6 + Math.random() * 1.7;
-    dummy.position.set(rx, ry + 0.35 * s, rz);
-    dummy.rotation.set((Math.random() - 0.5) * 0.4, Math.random() * Math.PI * 2, (Math.random() - 0.5) * 0.4);
-    dummy.scale.set(s * (0.85 + Math.random() * 0.35), s, s * (0.85 + Math.random() * 0.35));
-    dummy.updateMatrix();
-
-    rockMesh.setMatrixAt(rockIdx, dummy.matrix);
-    rockMesh.setColorAt(rockIdx, rockColors[Math.floor(Math.random() * rockColors.length)]);
-    rockIdx++;
-  }
-  rockMesh.instanceMatrix.needsUpdate = true;
-  if (rockMesh.instanceColor) rockMesh.instanceColor.needsUpdate = true;
-  rockMesh.computeBoundingSphere();
-  scene.add(rockMesh);
-
-  // 8. High-Quality 3D Volumetric Vegetation System (Curved 3D Grass Tufts, Meadow Plumes & 3D Wildflowers)
+  // 5. Grass system (trees / rocks / flowers are streamed by their own systems, see trees.ts / props.ts)
   const vegetation = setupVegetationSystem(scene, isSoftwareGl);
 
   // 9. Floating Airborne Motes / Pollen in Sunlight
@@ -374,9 +150,22 @@ export function setupEnvironment(
     particlePositions[i * 3 + 2] = (Math.random() - 0.5) * 45;
   }
   particleGeo.setAttribute('position', new THREE.BufferAttribute(particlePositions, 3));
+  // Soft round sprite: PointsMaterial without a map renders hard-edged squares
+  const dotCanvas = document.createElement('canvas');
+  dotCanvas.width = dotCanvas.height = 32;
+  const dctx = dotCanvas.getContext('2d')!;
+  const dg = dctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  dg.addColorStop(0, 'rgba(255,255,255,1)');
+  dg.addColorStop(0.4, 'rgba(255,255,255,0.45)');
+  dg.addColorStop(1, 'rgba(255,255,255,0)');
+  dctx.fillStyle = dg;
+  dctx.fillRect(0, 0, 32, 32);
+  const dotTex = new THREE.CanvasTexture(dotCanvas);
+  dotTex.colorSpace = THREE.SRGBColorSpace;
   const particleMat = new THREE.PointsMaterial({
+    map: dotTex,
     color: 0xfff0c8,
-    size: 0.18,
+    size: 0.12,
     transparent: true,
     opacity: 0.55,
     blending: THREE.AdditiveBlending,
@@ -408,27 +197,13 @@ export function setupEnvironment(
       scene.remove(hemiLight);
       scene.remove(sunLight);
       scene.remove(fillLight);
-      scene.remove(pineTrunkMesh);
-      scene.remove(pineFoliageMesh);
-      scene.remove(oakTrunkMesh);
-      scene.remove(oakCanopyMesh);
-      scene.remove(rockMesh);
       scene.remove(particleSystem);
 
       skyGeo.dispose();
       skyMat.dispose();
-      pineTrunkGeo.dispose();
-      pineTrunkMat.dispose();
-      pineFoliageGeo.dispose();
-      pineFoliageMat.dispose();
-      oakTrunkGeo.dispose();
-      oakTrunkMat.dispose();
-      oakCanopyGeo.dispose();
-      oakCanopyMat.dispose();
-      rockGeo.dispose();
-      rockMat.dispose();
       particleGeo.dispose();
       particleMat.dispose();
+      dotTex.dispose();
     },
   };
 }

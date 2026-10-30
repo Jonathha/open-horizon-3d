@@ -7,7 +7,12 @@ import {
 } from './proceduralTextures';
 
 export const TERRAIN_SIZE = 360;
-export const TERRAIN_SEGMENTS = 160;
+export const TERRAIN_SEGMENTS = 240;
+
+/** Z of the winding trail centre at world x. The terrain shader contains an identical GLSL copy. */
+export function pathCenterZ(x: number): number {
+  return Math.sin(x * 0.03) * 18.0 + Math.cos(x * 0.015) * 8.0;
+}
 
 /**
  * Deterministic terrain elevation function.
@@ -50,7 +55,7 @@ export function getTerrainNormal(x: number, z: number, target = new THREE.Vector
   return target;
 }
 
-export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]; textures: THREE.Texture[] } {
+export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]; textures: THREE.Texture[]; disposeExtra: () => void } {
   const geometry = new THREE.PlaneGeometry(TERRAIN_SIZE, TERRAIN_SIZE, TERRAIN_SEGMENTS, TERRAIN_SEGMENTS);
   geometry.rotateX(-Math.PI / 2);
 
@@ -73,10 +78,10 @@ export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]
   const colors = new Float32Array(count * 3);
   const normalAttr = geometry.attributes.normal;
 
-  const grassColor = new THREE.Color(0x76b852);
-  const darkGrassColor = new THREE.Color(0x3e7228);
-  const pathColor = new THREE.Color(0x927856);
-  const cliffColor = new THREE.Color(0x6e767c);
+  const grassColor = new THREE.Color(0xffffff);
+  const darkGrassColor = new THREE.Color(0xc9d4b8);
+  const pathColor = new THREE.Color(0xf0e4d4);
+  const cliffColor = new THREE.Color(0xd8dcde);
 
   const tempColor = new THREE.Color();
 
@@ -86,7 +91,7 @@ export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]
     const ny = normalAttr.getY(i);
 
     const slope = Math.acos(Math.min(1.0, Math.max(0.0, ny)));
-    const pathDist = Math.abs(vz - (Math.sin(vx * 0.03) * 18.0 + Math.cos(vx * 0.015) * 8.0));
+    const pathDist = Math.abs(vz - pathCenterZ(vx));
     const isPath = pathDist < 3.2;
 
     if (slope > 0.28) {
@@ -132,6 +137,26 @@ export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]
     t.wrapT = THREE.RepeatWrapping;
   });
 
+  // Real photographic ground textures (MIT, ez-tree). Procedural ones stay as fallback if loading fails.
+  const base = import.meta.env.BASE_URL;
+  const soilMapU = { value: soilTex.diffuse as THREE.Texture };
+  const soilNormalU = { value: soilTex.normal as THREE.Texture };
+  const realTextures: THREE.Texture[] = [];
+  const loader = new THREE.TextureLoader();
+  const loadReal = (file: string, srgb: boolean, apply: (t: THREE.Texture) => void) =>
+    loader.load(
+      `${base}textures/${file}`,
+      (t) => {
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        t.anisotropy = 8;
+        realTextures.push(t);
+        apply(t);
+      },
+      undefined,
+      (e) => console.warn(`[terrain] ${file} failed to load, keeping procedural texture`, e)
+    );
+
   const material = new THREE.MeshStandardMaterial({
     map: grassTex.diffuse,
     normalMap: grassTex.normal,
@@ -141,9 +166,19 @@ export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]
     vertexColors: true,
   });
 
+  loadReal('grass.jpg', true, (t) => {
+    material.map = t;
+  });
+  loadReal('dirt_color.jpg', true, (t) => {
+    soilMapU.value = t;
+  });
+  loadReal('dirt_normal.jpg', false, (t) => {
+    soilNormalU.value = t;
+  });
+
   material.onBeforeCompile = (shader) => {
-    shader.uniforms.soilMap = { value: soilTex.diffuse };
-    shader.uniforms.soilNormal = { value: soilTex.normal };
+    shader.uniforms.soilMap = soilMapU;
+    shader.uniforms.soilNormal = soilNormalU;
     shader.uniforms.rockMap = { value: rockTex.diffuse };
     shader.uniforms.rockNormal = { value: rockTex.normal };
     shader.uniforms.pebbleMap = { value: pebbleTex.diffuse };
@@ -172,6 +207,11 @@ export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]
     );
 
     shader.fragmentShader = `
+      float tHash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float tNoise(vec2 p) {
+        vec2 i = floor(p); vec2 f = fract(p); vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(tHash(i), tHash(i + vec2(1.0, 0.0)), u.x), mix(tHash(i + vec2(0.0, 1.0)), tHash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
       uniform sampler2D soilMap;
       uniform sampler2D soilNormal;
       uniform sampler2D rockMap;
@@ -188,16 +228,23 @@ export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]
       '#include <map_fragment>',
       `
       // Multi-scale procedural PBR blending
-      vec2 uvDetail = vWorldPosition.xz * 0.25;
-      vec2 uvMacro = vWorldPosition.xz * 0.04;
+      vec2 uvDetail = vWorldPosition.xz * 0.32;
+      vec2 uvMacro = vWorldPosition.xz * 0.05;
 
-      vec4 grassCol = texture2D(map, uvDetail);
+      // Anti-tiling: two differently scaled/rotated samples blended by low-frequency noise
+      float blendN = tNoise(vWorldPosition.xz * 0.045);
+      vec2 uvRot = mat2(0.8, -0.6, 0.6, 0.8) * vWorldPosition.xz * 0.17;
+      vec4 grassCol = mix(texture2D(map, uvDetail * 0.8), texture2D(map, uvRot), smoothstep(0.3, 0.7, blendN));
       vec4 grassMacro = texture2D(map, uvMacro);
-      grassCol = mix(grassCol, grassMacro, 0.35);
+      grassCol = mix(grassCol, grassMacro, 0.25);
+      // Large-scale colour drift (lush / dry patches) so the meadow never reads as a flat repeat
+      float macroN = tNoise(vWorldPosition.xz * 0.022) * 0.6 + tNoise(vWorldPosition.xz * 0.07) * 0.4;
+      vec3 macroTint = mix(vec3(0.92, 1.05, 0.78), vec3(1.12, 1.02, 0.86), macroN);
+      grassCol.rgb *= 2.15 * macroTint;
 
-      vec4 soilCol = texture2D(soilMap, uvDetail * 1.3);
+      vec4 soilCol = texture2D(soilMap, uvDetail * 0.9) * 1.55;
       vec4 pebbleCol = texture2D(pebbleMap, uvDetail * 2.1);
-      vec4 trailCol = mix(soilCol, pebbleCol, 0.42);
+      vec4 trailCol = mix(soilCol, pebbleCol, 0.2);
 
       vec4 rockCol = texture2D(rockMap, uvDetail * 0.85);
 
@@ -216,9 +263,9 @@ export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]
       '#include <normal_fragment_maps>',
       `
       #include <normal_fragment_maps>
-      vec2 uvDet = vWorldPosition.xz * 0.25;
+      vec2 uvDet = vWorldPosition.xz * 0.32;
       vec3 nGrass = texture2D(normalMap, uvDet).xyz * 2.0 - 1.0;
-      vec3 nSoil = texture2D(soilNormal, uvDet * 1.3).xyz * 2.0 - 1.0;
+      vec3 nSoil = texture2D(soilNormal, uvDet * 0.9).xyz * 2.0 - 1.0;
       vec3 nRock = texture2D(rockNormal, uvDet * 0.85).xyz * 2.0 - 1.0;
 
       float distC = length(vWorldPosition.xz);
@@ -237,6 +284,11 @@ export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]
   mesh.receiveShadow = true;
   mesh.castShadow = false;
 
-  return { mesh, materials: [material], textures: allTextures };
+  return {
+    mesh,
+    materials: [material],
+    textures: allTextures,
+    disposeExtra: () => realTextures.forEach((t) => t.dispose()),
+  };
 }
 

@@ -1,5 +1,7 @@
 import * as THREE from 'three';
 import { getTerrainHeight, getTerrainNormal } from './terrain';
+import { resolveCollisions } from './world';
+import { loadPlayerModel, type PlayerModel } from './playerModel';
 import { createArmorTexture } from './proceduralTextures';
 
 import type { AraCharacterInstance } from '../ara3d/araManager';
@@ -19,6 +21,7 @@ export interface CharacterController {
 }
 
 export function createCharacter(isSoftwareGl: boolean): CharacterController {
+  let disposed = false;
   const group = new THREE.Group();
   group.name = 'player';
 
@@ -280,6 +283,7 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
   let isGrounded = true;
   let isMoving = false;
   let isSprinting = false;
+  let landVy = 0;
 
   // Math helpers allocated once at module/scope level
   const normalHelper = new THREE.Vector3();
@@ -294,6 +298,26 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
   position.y = getTerrainHeight(position.x, position.z);
   group.position.copy(position);
   let customAvatar: AraCharacterInstance | null = null;
+
+  // New player model (async). The procedural robot is only a fallback if the GLB fails to load.
+  let playerModel: PlayerModel | null = null;
+  let modelFailed = false;
+  pelvis.visible = false;
+  loadPlayerModel(isSoftwareGl)
+    .then((m) => {
+      if (disposed) {
+        m.dispose();
+        return;
+      }
+      playerModel = m;
+      m.root.visible = !customAvatar;
+      actor.add(m.root);
+    })
+    .catch((err) => {
+      console.error('[character] failed to load player model, using procedural fallback', err);
+      modelFailed = true;
+      pelvis.visible = !customAvatar;
+    });
 
   return {
     group,
@@ -325,6 +349,7 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
       }
       customAvatar = avatar;
       pelvis.visible = false;
+      if (playerModel) playerModel.root.visible = false;
       avatar.group.position.set(0, 0, 0);
       actor.add(avatar.group);
     },
@@ -372,7 +397,12 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
         currentBank = THREE.MathUtils.damp(currentBank, 0, 10, dt);
       }
 
-      // Jump & Gravity mechanics
+      // Apply horizontal displacement, then push out of trunks/rocks and keep inside the playable disc
+      position.x += velocity.x * dt;
+      position.z += velocity.z * dt;
+      resolveCollisions(position);
+
+      // Jump & Gravity mechanics (ground height is sampled after the horizontal move)
       const groundY = getTerrainHeight(position.x, position.z);
       if (isGrounded) {
         if (jump) {
@@ -387,14 +417,11 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
         position.y += verticalVelocity * dt;
         if (position.y <= groundY) {
           position.y = groundY;
+          landVy = verticalVelocity; // remembered for the landing animation
           verticalVelocity = 0;
           isGrounded = true;
         }
       }
-
-      // Apply horizontal displacement
-      position.x += velocity.x * dt;
-      position.z += velocity.z * dt;
 
       // Update character root transform
       group.position.set(position.x, position.y, position.z);
@@ -446,7 +473,14 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
           const strideLength = isSprinting ? 2.15 : 1.35;
           gaitPhase += (groundSpeed / strideLength) * Math.PI * 2 * dt;
         }
-      } else {
+      } else if (playerModel) {
+        playerModel.update(dt, { grounded: isGrounded, speed: groundSpeed, sprinting: isSprinting, vy: isGrounded ? landVy : verticalVelocity });
+        landVy = 0;
+        if (isGrounded && groundSpeed > 0.15) {
+          const strideLength = isSprinting ? 2.15 : 1.35;
+          gaitPhase += (groundSpeed / strideLength) * Math.PI * 2 * dt;
+        }
+      } else if (modelFailed) {
         if (!isGrounded) {
           // Airborne pose
           pelvis.position.y = THREE.MathUtils.damp(pelvis.position.y, 0.98, 8, dt);
@@ -522,6 +556,9 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
     },
 
     dispose: () => {
+      disposed = true;
+      playerModel?.dispose();
+      playerModel = null;
       if (customAvatar) {
         customAvatar.dispose();
         customAvatar = null;

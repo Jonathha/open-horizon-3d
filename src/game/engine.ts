@@ -5,6 +5,8 @@ import { createCharacter } from './character';
 import { createThirdPersonCamera } from './camera';
 import { InputManager } from './controls';
 import { sound } from './audio';
+import { setupTrees, type TreeSystem } from './trees';
+import { setupProps, type PropsController } from './props';
 
 import type { AraCharacterInstance } from '../ara3d/araManager';
 
@@ -23,7 +25,9 @@ export interface GameEngine {
 
 export function initGameEngine(container: HTMLElement): GameEngine {
   // 1. Detect software WebGL per Three.js skill guidelines
-  const isSoftwareGl = (() => {
+  // `?hq` forces the full-quality path (shadows, MSAA, full densities) even on software renderers (used for testing)
+  const forceHq = /[?&]hq\b/.test(window.location.search);
+  const isSoftwareGl = !forceHq && (() => {
     const gl = document.createElement('canvas').getContext('webgl2');
     if (!gl) return true;
     const ext = gl.getExtension('WEBGL_debug_renderer_info');
@@ -67,6 +71,17 @@ export function initGameEngine(container: HTMLElement): GameEngine {
   // Environment (Sky, lights, instanced trees, rocks, vegetation)
   const environment = setupEnvironment(scene, renderer, isSoftwareGl);
 
+  // Trees (ez-tree) and GLB props (rocks, flowers) stream in asynchronously; failures are logged, never fatal
+  let trees: TreeSystem | null = null;
+  let props: PropsController | null = null;
+  let disposed = false;
+  setupTrees(scene, isSoftwareGl)
+    .then((t) => (disposed ? t.dispose() : (trees = t)))
+    .catch((e) => console.error('[engine] tree system failed to initialise', e));
+  setupProps(scene, isSoftwareGl)
+    .then((p) => (disposed ? p.dispose() : (props = p)))
+    .catch((e) => console.error('[engine] props failed to initialise', e));
+
   // Character
   const character = createCharacter(isSoftwareGl);
   scene.add(character.group);
@@ -85,8 +100,12 @@ export function initGameEngine(container: HTMLElement): GameEngine {
     renderer.compile(scene, tpCamera.camera);
   }
 
+  if (import.meta.env.DEV) {
+    (window as unknown as Record<string, unknown>).__oh = { renderer, scene, character, camera: tpCamera.camera, isSoftwareGl };
+  }
+
   // Loop & Timing
-  const clock = new THREE.Clock();
+  const timer = new THREE.Timer();
   let animationFrameId = 0;
   let isRunning = false;
   let lastGaitStep = 0;
@@ -110,7 +129,8 @@ export function initGameEngine(container: HTMLElement): GameEngine {
   function tick() {
     if (!isRunning) return;
 
-    const delta = clock.getDelta();
+    timer.update();
+    const delta = timer.getDelta();
 
     // 1. Process movement inputs relative to camera perspective
     const { forward: camForward, right: camRight } = tpCamera.getHorizontalVectors();
@@ -134,7 +154,9 @@ export function initGameEngine(container: HTMLElement): GameEngine {
     }
 
     // 5. Update environment lighting & shadow cascades
-    environment.update(character.position, clock.getElapsedTime());
+    environment.update(character.position, timer.getElapsed());
+    trees?.update(character.position);
+    props?.update(character.position);
 
     // 6. Smooth third person camera tracking
     tpCamera.update(delta, character.position);
@@ -154,7 +176,7 @@ export function initGameEngine(container: HTMLElement): GameEngine {
     start: () => {
       if (isRunning) return;
       isRunning = true;
-      clock.start();
+      timer.reset();
       if (isSoftwareGl) {
         afterDraw(tick);
       } else {
@@ -185,6 +207,9 @@ export function initGameEngine(container: HTMLElement): GameEngine {
       character.setCustomAvatar(avatar);
     },
     dispose: () => {
+      disposed = true;
+      trees?.dispose();
+      props?.dispose();
       isRunning = false;
       cancelAnimationFrame(animationFrameId);
       clearTimeout(animationFrameId);
@@ -194,6 +219,7 @@ export function initGameEngine(container: HTMLElement): GameEngine {
       character.dispose();
       terrain.materials.forEach((m) => m.dispose());
       terrain.textures.forEach((t) => t.dispose());
+      terrain.disposeExtra();
       terrain.mesh.geometry.dispose();
 
       renderer.dispose();
