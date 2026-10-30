@@ -12,6 +12,7 @@ export type LocoState = 'idle' | 'walk' | 'run' | 'rise' | 'fall';
 
 export interface PlayerModel {
   root: THREE.Group;
+  skinnedMeshCount: number;
   update: (dt: number, s: { grounded: boolean; speed: number; sprinting: boolean; vy: number }) => void;
   dispose: () => void;
 }
@@ -20,6 +21,40 @@ const HEIGHT = 1.8;
 // ground speed (m/s) at which each clip's feet are planted at timeScale 1 (estimated from stride length)
 const WALK_REF = 1.9;
 const RUN_REF = 4.2;
+
+
+/**
+ * Yaw (rotation about +Y) that turns the model's own "front" onto +Z, the direction the controller treats as forward.
+ * The front is read from the rest pose: toes point forward from the ankles (averaged over both feet so a slight
+ * toe-out cancels). This fixes the orientation at the asset boundary instead of patching rotations elsewhere.
+ */
+function detectFrontYaw(model: THREE.Object3D): number {
+  model.updateMatrixWorld(true);
+  const bones = new Map<string, THREE.Object3D>();
+  model.traverse((o) => {
+    // GLTFLoader strips ':' from node names (mixamorig:LeftFoot -> mixamorigLeftFoot)
+    const m = /(Left|Right)(Foot|ToeBase)$/.exec(o.name);
+    if (m && !bones.has(m[1] + m[2])) bones.set(m[1] + m[2], o);
+  });
+  const a = new THREE.Vector3();
+  const b = new THREE.Vector3();
+  let fx = 0;
+  let fz = 0;
+  for (const side of ['Left', 'Right']) {
+    const foot = bones.get(side + 'Foot');
+    const toe = bones.get(side + 'ToeBase');
+    if (!foot || !toe) continue;
+    foot.getWorldPosition(a);
+    toe.getWorldPosition(b);
+    fx += b.x - a.x;
+    fz += b.z - a.z;
+  }
+  if (Math.hypot(fx, fz) < 1e-5) {
+    console.warn('[playerModel] could not read the rest-pose front direction; assuming +Z');
+    return 0;
+  }
+  return -Math.atan2(fx, fz);
+}
 
 export async function loadPlayerModel(isSoftwareGl: boolean): Promise<PlayerModel> {
   const gltf = await new GLTFLoader().loadAsync(`${import.meta.env.BASE_URL}models/Soldier.glb`);
@@ -31,7 +66,8 @@ export async function loadPlayerModel(isSoftwareGl: boolean): Promise<PlayerMode
   const runClip = find('run');
   if (!idleClip || !walkClip || !runClip) throw new Error('Soldier.glb is missing Idle/Walk/Run clips');
 
-  // Normalise size & pivot: feet on y=0, 1.8 m tall
+  // Normalise orientation, size & pivot: front on +Z, feet on y=0, 1.8 m tall
+  const frontYaw = detectFrontYaw(model);
   model.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(model);
   const k = HEIGHT / (box.max.y - box.min.y);
@@ -41,12 +77,15 @@ export async function loadPlayerModel(isSoftwareGl: boolean): Promise<PlayerMode
   holder.add(model);
   holder.scale.setScalar(k);
   holder.position.y = -box.min.y * k;
+  holder.rotation.y = frontYaw;
   root.add(holder);
 
   const ownedMaterials = new Set<THREE.Material>();
+  let skinnedMeshCount = 0;
   model.traverse((o) => {
     const m = o as THREE.SkinnedMesh;
     if (!m.isMesh) return;
+    if (m.isSkinnedMesh) skinnedMeshCount++;
     m.castShadow = !isSoftwareGl;
     m.receiveShadow = true;
     m.frustumCulled = false; // skinned bounds are not tracking the animated pose
@@ -61,6 +100,8 @@ export async function loadPlayerModel(isSoftwareGl: boolean): Promise<PlayerMode
       }
     });
   });
+
+  if (skinnedMeshCount === 0) throw new Error('Soldier.glb has no skinned mesh');
 
   const mixer = new THREE.AnimationMixer(model);
   const idle = mixer.clipAction(idleClip);
@@ -100,6 +141,7 @@ export async function loadPlayerModel(isSoftwareGl: boolean): Promise<PlayerMode
 
   return {
     root,
+    skinnedMeshCount,
     update: (dt, s) => {
       // --- state selection ---
       let next: LocoState;

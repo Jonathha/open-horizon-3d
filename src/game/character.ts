@@ -2,7 +2,6 @@ import * as THREE from 'three';
 import { getTerrainHeight, getTerrainNormal } from './terrain';
 import { resolveCollisions } from './world';
 import { loadPlayerModel, type PlayerModel } from './playerModel';
-import { createArmorTexture } from './proceduralTextures';
 
 import type { AraCharacterInstance } from '../ara3d/araManager';
 
@@ -15,6 +14,10 @@ export interface CharacterController {
   isSprinting: boolean;
   isGrounded: boolean;
   gaitPhase: number;
+  /** Resolves once the model is instanced in the scene; rejects if it cannot be loaded. */
+  ready: Promise<void>;
+  /** True when a visible, skinned body is actually attached to the scene graph. */
+  isRenderable: () => boolean;
   setCustomAvatar: (avatar: AraCharacterInstance) => void;
   update: (delta: number, moveInput: { x: number; y: number }, sprint: boolean, jump: boolean) => void;
   dispose: () => void;
@@ -24,49 +27,6 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
   let disposed = false;
   const group = new THREE.Group();
   group.name = 'player';
-
-  // Procedural Materials
-  const { diffuse: armorDiff, normal: armorNorm } = createArmorTexture();
-
-  // Dark slate cyber-armor
-  const armorMat = new THREE.MeshStandardMaterial({
-    map: armorDiff,
-    normalMap: armorNorm,
-    roughness: 0.35,
-    metalness: 0.65,
-    color: 0x242c3b,
-  });
-
-  // Matte under-suit / joints
-  const underSuitMat = new THREE.MeshStandardMaterial({
-    roughness: 0.8,
-    metalness: 0.1,
-    color: 0x14171d,
-  });
-
-  // Metallic accents & pauldrons
-  const plateMat = new THREE.MeshStandardMaterial({
-    roughness: 0.22,
-    metalness: 0.92,
-    color: 0x8a9ba8,
-  });
-
-  // Visor emissive glow
-  const visorMat = new THREE.MeshStandardMaterial({
-    color: 0x00d2ff,
-    emissive: 0x00b4d8,
-    emissiveIntensity: 2.0,
-    roughness: 0.1,
-    metalness: 0.2,
-  });
-
-  // Accent emissive reactor
-  const coreMat = new THREE.MeshStandardMaterial({
-    color: 0x38bdf8,
-    emissive: 0x0ea5e9,
-    emissiveIntensity: 2.4,
-    roughness: 0.2,
-  });
 
   // Soft contact shadow beneath feet
   const shadowGeo = new THREE.PlaneGeometry(1.6, 1.6);
@@ -99,179 +59,6 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
   const actor = new THREE.Group();
   group.add(actor);
 
-  // --- Pelvis / Hips ---
-  const pelvis = new THREE.Group();
-  pelvis.position.y = 0.95;
-  actor.add(pelvis);
-
-  const pelvisMesh = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.22, 0.24), armorMat);
-  pelvisMesh.castShadow = !isSoftwareGl;
-  pelvis.add(pelvisMesh);
-
-  // Belt / pouch details
-  const beltMesh = new THREE.Mesh(new THREE.BoxGeometry(0.39, 0.06, 0.26), plateMat);
-  pelvis.add(beltMesh);
-
-  // --- Torso / Chest ---
-  const spine = new THREE.Group();
-  spine.position.y = 0.16;
-  pelvis.add(spine);
-
-  const torsoMesh = new THREE.Mesh(new THREE.BoxGeometry(0.44, 0.42, 0.28), armorMat);
-  torsoMesh.position.y = 0.22;
-  torsoMesh.castShadow = !isSoftwareGl;
-  spine.add(torsoMesh);
-
-  // Chest armor reinforcement plate
-  const chestPlate = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.32, 0.08), plateMat);
-  chestPlate.position.set(0, 0.24, 0.13);
-  chestPlate.castShadow = !isSoftwareGl;
-  spine.add(chestPlate);
-
-  // Power core reactor
-  const coreMesh = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.06, 12), coreMat);
-  coreMesh.rotateX(Math.PI / 2);
-  coreMesh.position.set(0, 0.26, 0.17);
-  spine.add(coreMesh);
-
-  // Backpack battery unit
-  const backpackMesh = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.32, 0.12), plateMat);
-  backpackMesh.position.set(0, 0.24, -0.16);
-  backpackMesh.castShadow = !isSoftwareGl;
-  spine.add(backpackMesh);
-
-  // --- Neck & Head ---
-  const neck = new THREE.Group();
-  neck.position.y = 0.45;
-  spine.add(neck);
-
-  const headGroup = new THREE.Group();
-  headGroup.position.y = 0.12;
-  neck.add(headGroup);
-
-  // Helmet
-  const helmetMesh = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.26, 0.26), armorMat);
-  helmetMesh.castShadow = !isSoftwareGl;
-  headGroup.add(helmetMesh);
-
-  // Visor
-  const visorMesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.08, 0.06), visorMat);
-  visorMesh.position.set(0, 0.02, 0.125);
-  headGroup.add(visorMesh);
-
-  // Helmet crest
-  const crestMesh = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.06, 0.24), plateMat);
-  crestMesh.position.set(0, 0.14, -0.01);
-  headGroup.add(crestMesh);
-
-  // --- Shoulders and Arms ---
-  // Left Arm
-  const leftShoulder = new THREE.Group();
-  leftShoulder.position.set(-0.28, 0.38, 0);
-  spine.add(leftShoulder);
-
-  const leftPauldron = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.18), plateMat);
-  leftPauldron.position.set(-0.02, 0.02, 0);
-  leftPauldron.castShadow = !isSoftwareGl;
-  leftShoulder.add(leftPauldron);
-
-  const leftUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.28, 8), underSuitMat);
-  leftUpperArm.position.y = -0.15;
-  leftUpperArm.castShadow = !isSoftwareGl;
-  leftShoulder.add(leftUpperArm);
-
-  const leftElbow = new THREE.Group();
-  leftElbow.position.y = -0.28;
-  leftShoulder.add(leftElbow);
-
-  const leftLowerArm = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.26, 0.11), armorMat);
-  leftLowerArm.position.y = -0.12;
-  leftLowerArm.castShadow = !isSoftwareGl;
-  leftElbow.add(leftLowerArm);
-
-  // Right Arm
-  const rightShoulder = new THREE.Group();
-  rightShoulder.position.set(0.28, 0.38, 0);
-  spine.add(rightShoulder);
-
-  const rightPauldron = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.14, 0.18), plateMat);
-  rightPauldron.position.set(0.02, 0.02, 0);
-  rightPauldron.castShadow = !isSoftwareGl;
-  rightShoulder.add(rightPauldron);
-
-  const rightUpperArm = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.055, 0.28, 8), underSuitMat);
-  rightUpperArm.position.y = -0.15;
-  rightUpperArm.castShadow = !isSoftwareGl;
-  rightShoulder.add(rightUpperArm);
-
-  const rightElbow = new THREE.Group();
-  rightElbow.position.y = -0.28;
-  rightShoulder.add(rightElbow);
-
-  const rightLowerArm = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.26, 0.11), armorMat);
-  rightLowerArm.position.y = -0.12;
-  rightLowerArm.castShadow = !isSoftwareGl;
-  rightElbow.add(rightLowerArm);
-
-  // --- Legs ---
-  // Left Leg
-  const leftHip = new THREE.Group();
-  leftHip.position.set(-0.14, -0.06, 0);
-  pelvis.add(leftHip);
-
-  const leftUpperLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.42, 8), underSuitMat);
-  leftUpperLeg.position.y = -0.21;
-  leftUpperLeg.castShadow = !isSoftwareGl;
-  leftHip.add(leftUpperLeg);
-
-  const leftThighArmor = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.24, 0.18), armorMat);
-  leftThighArmor.position.set(0, -0.18, 0.02);
-  leftThighArmor.castShadow = !isSoftwareGl;
-  leftHip.add(leftThighArmor);
-
-  const leftKnee = new THREE.Group();
-  leftKnee.position.y = -0.42;
-  leftHip.add(leftKnee);
-
-  const leftLowerLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.42, 8), underSuitMat);
-  leftLowerLeg.position.y = -0.21;
-  leftLowerLeg.castShadow = !isSoftwareGl;
-  leftKnee.add(leftLowerLeg);
-
-  const leftBoot = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.18, 0.24), plateMat);
-  leftBoot.position.set(0, -0.36, 0.04);
-  leftBoot.castShadow = !isSoftwareGl;
-  leftKnee.add(leftBoot);
-
-  // Right Leg
-  const rightHip = new THREE.Group();
-  rightHip.position.set(0.14, -0.06, 0);
-  pelvis.add(rightHip);
-
-  const rightUpperLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.07, 0.42, 8), underSuitMat);
-  rightUpperLeg.position.y = -0.21;
-  rightUpperLeg.castShadow = !isSoftwareGl;
-  rightHip.add(rightUpperLeg);
-
-  const rightThighArmor = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.24, 0.18), armorMat);
-  rightThighArmor.position.set(0, -0.18, 0.02);
-  rightThighArmor.castShadow = !isSoftwareGl;
-  rightHip.add(rightThighArmor);
-
-  const rightKnee = new THREE.Group();
-  rightKnee.position.y = -0.42;
-  rightHip.add(rightKnee);
-
-  const rightLowerLeg = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.42, 8), underSuitMat);
-  rightLowerLeg.position.y = -0.21;
-  rightLowerLeg.castShadow = !isSoftwareGl;
-  rightKnee.add(rightLowerLeg);
-
-  const rightBoot = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.18, 0.24), plateMat);
-  rightBoot.position.set(0, -0.36, 0.04);
-  rightBoot.castShadow = !isSoftwareGl;
-  rightKnee.add(rightBoot);
-
   // Kinematic & Animation State
   const position = new THREE.Vector3(0, 0, 0);
   const velocity = new THREE.Vector3();
@@ -299,29 +86,25 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
   group.position.copy(position);
   let customAvatar: AraCharacterInstance | null = null;
 
-  // New player model (async). The procedural robot is only a fallback if the GLB fails to load.
+  // Player model (async). There is no stand-in body: if the GLB fails, `ready` rejects and the loader reports it.
   let playerModel: PlayerModel | null = null;
-  let modelFailed = false;
-  pelvis.visible = false;
-  loadPlayerModel(isSoftwareGl)
-    .then((m) => {
-      if (disposed) {
-        m.dispose();
-        return;
-      }
-      playerModel = m;
-      m.root.visible = !customAvatar;
-      actor.add(m.root);
-    })
-    .catch((err) => {
-      console.error('[character] failed to load player model, using procedural fallback', err);
-      modelFailed = true;
-      pelvis.visible = !customAvatar;
-    });
+  const ready: Promise<void> = loadPlayerModel(isSoftwareGl).then((m) => {
+    if (disposed) {
+      m.dispose();
+      return;
+    }
+    playerModel = m;
+    m.root.visible = !customAvatar;
+    actor.add(m.root);
+  });
+  // Avoid an unhandled-rejection warning when nobody awaits `ready` (e.g. disposed early); the engine awaits it.
+  ready.catch(() => {});
 
   return {
     group,
     position,
+    ready,
+    isRenderable: () => !!customAvatar || (!!playerModel && playerModel.root.visible && playerModel.root.parent === actor && playerModel.skinnedMeshCount > 0),
     velocity,
     get rotationY() {
       return rotationY;
@@ -348,7 +131,6 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
         customAvatar.dispose();
       }
       customAvatar = avatar;
-      pelvis.visible = false;
       if (playerModel) playerModel.root.visible = false;
       avatar.group.position.set(0, 0, 0);
       actor.add(avatar.group);
@@ -480,78 +262,6 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
           const strideLength = isSprinting ? 2.15 : 1.35;
           gaitPhase += (groundSpeed / strideLength) * Math.PI * 2 * dt;
         }
-      } else if (modelFailed) {
-        if (!isGrounded) {
-          // Airborne pose
-          pelvis.position.y = THREE.MathUtils.damp(pelvis.position.y, 0.98, 8, dt);
-          spine.rotation.x = THREE.MathUtils.damp(spine.rotation.x, 0.15, 6, dt);
-          leftHip.rotation.x = THREE.MathUtils.damp(leftHip.rotation.x, -0.4, 8, dt);
-          rightHip.rotation.x = THREE.MathUtils.damp(rightHip.rotation.x, 0.3, 8, dt);
-          leftKnee.rotation.x = THREE.MathUtils.damp(leftKnee.rotation.x, 0.6, 8, dt);
-          rightKnee.rotation.x = THREE.MathUtils.damp(rightKnee.rotation.x, 0.5, 8, dt);
-          leftShoulder.rotation.x = THREE.MathUtils.damp(leftShoulder.rotation.x, -0.5, 8, dt);
-          rightShoulder.rotation.x = THREE.MathUtils.damp(rightShoulder.rotation.x, -0.5, 8, dt);
-          leftElbow.rotation.x = THREE.MathUtils.damp(leftElbow.rotation.x, -0.4, 8, dt);
-          rightElbow.rotation.x = THREE.MathUtils.damp(rightElbow.rotation.x, -0.4, 8, dt);
-        } else if (groundSpeed > 0.15) {
-          // Real-time stride synchronization
-          const strideLength = isSprinting ? 2.15 : 1.35;
-          gaitPhase += (groundSpeed / strideLength) * Math.PI * 2 * dt;
-
-          const stride = Math.sin(gaitPhase);
-          const counterStride = -stride;
-          const bounce = Math.abs(Math.sin(gaitPhase)) * (isSprinting ? 0.08 : 0.04);
-
-          pelvis.position.y = 0.95 + bounce;
-          pelvis.rotation.z = Math.sin(gaitPhase) * 0.035;
-
-          const speedNorm = groundSpeed / sprintSpeed;
-          const forwardLean = THREE.MathUtils.lerp(0.06, 0.24, speedNorm);
-          spine.rotation.x = forwardLean;
-          spine.rotation.y = Math.sin(gaitPhase) * 0.07;
-
-          const legAmp = THREE.MathUtils.lerp(0.5, 0.85, speedNorm);
-          leftHip.rotation.x = stride * legAmp;
-          rightHip.rotation.x = counterStride * legAmp;
-
-          leftKnee.rotation.x = Math.max(0, Math.sin(gaitPhase - 0.4)) * (isSprinting ? 1.2 : 0.75);
-          rightKnee.rotation.x = Math.max(0, Math.sin(gaitPhase + Math.PI - 0.4)) * (isSprinting ? 1.2 : 0.75);
-
-          const armAmp = THREE.MathUtils.lerp(0.5, 0.95, speedNorm);
-          leftShoulder.rotation.x = counterStride * armAmp;
-          rightShoulder.rotation.x = stride * armAmp;
-
-          leftShoulder.rotation.z = -0.15;
-          rightShoulder.rotation.z = 0.15;
-
-          leftElbow.rotation.x = -Math.abs(Math.sin(gaitPhase)) * (isSprinting ? 0.85 : 0.4);
-          rightElbow.rotation.x = -Math.abs(Math.sin(gaitPhase + Math.PI)) * (isSprinting ? 0.85 : 0.4);
-
-          headGroup.rotation.x = -forwardLean * 0.75;
-        } else {
-          // Idle breathing
-          const idleTime = performance.now() * 0.002;
-          const breath = Math.sin(idleTime) * 0.015;
-
-          pelvis.position.y = THREE.MathUtils.damp(pelvis.position.y, 0.95 + breath, 5, dt);
-          pelvis.rotation.z = THREE.MathUtils.damp(pelvis.rotation.z, 0, 6, dt);
-          spine.rotation.x = THREE.MathUtils.damp(spine.rotation.x, breath * 0.5, 5, dt);
-          spine.rotation.y = THREE.MathUtils.damp(spine.rotation.y, 0, 5, dt);
-
-          leftHip.rotation.x = THREE.MathUtils.damp(leftHip.rotation.x, 0, 8, dt);
-          rightHip.rotation.x = THREE.MathUtils.damp(rightHip.rotation.x, 0, 8, dt);
-          leftKnee.rotation.x = THREE.MathUtils.damp(leftKnee.rotation.x, 0.05, 8, dt);
-          rightKnee.rotation.x = THREE.MathUtils.damp(rightKnee.rotation.x, 0.05, 8, dt);
-
-          leftShoulder.rotation.x = THREE.MathUtils.damp(leftShoulder.rotation.x, Math.sin(idleTime) * 0.04, 5, dt);
-          rightShoulder.rotation.x = THREE.MathUtils.damp(rightShoulder.rotation.x, -Math.sin(idleTime) * 0.04, 5, dt);
-          leftShoulder.rotation.z = THREE.MathUtils.damp(leftShoulder.rotation.z, -0.1, 5, dt);
-          rightShoulder.rotation.z = THREE.MathUtils.damp(rightShoulder.rotation.z, 0.1, 5, dt);
-          leftElbow.rotation.x = THREE.MathUtils.damp(leftElbow.rotation.x, -0.15, 5, dt);
-          rightElbow.rotation.x = THREE.MathUtils.damp(rightElbow.rotation.x, -0.15, 5, dt);
-
-          headGroup.rotation.x = THREE.MathUtils.damp(headGroup.rotation.x, 0, 5, dt);
-        }
       }
     },
 
@@ -563,11 +273,6 @@ export function createCharacter(isSoftwareGl: boolean): CharacterController {
         customAvatar.dispose();
         customAvatar = null;
       }
-      armorMat.dispose();
-      underSuitMat.dispose();
-      plateMat.dispose();
-      visorMat.dispose();
-      coreMat.dispose();
       shadowGeo.dispose();
       shadowMat.dispose();
       shadowTex.dispose();
