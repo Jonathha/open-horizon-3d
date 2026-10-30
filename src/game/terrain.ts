@@ -208,7 +208,7 @@ export function createTerrain(): { mesh: THREE.Mesh; materials: THREE.Material[]
       vec4 groundColor = mix(grassCol, trailCol, isTrail);
       groundColor = mix(groundColor, rockCol, isRock);
 
-      diffuseColor = groundColor * vec4(vColor, 1.0);
+      diffuseColor = groundColor * vColor;
       `
     );
 
