@@ -1,0 +1,6 @@
+{
+  "name": "Open Horizon 3D",
+  "description": "Protótipo interativo de mundo aberto 3D com personagem articulado, iluminação PBR e exploração contínua.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
